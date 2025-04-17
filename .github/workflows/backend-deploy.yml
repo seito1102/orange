@@ -141,5 +141,5 @@ jobs:
           # コードデプロイを使う場合
           # https://github.com/aws-actions/amazon-ecs-deploy-task-definition#aws-codedeploy-support
           codedeploy-appspec: appspec.json
-          codedeploy-application: sengoku-codedeploy-application
-          codedeploy-deployment-group: sengoku-codedeploy-deployment-group
+          codedeploy-application: orange-dev-codedeploy-application
+          codedeploy-deployment-group: orange-dev-codedeploy-deployment-group
