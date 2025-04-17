@@ -8,11 +8,11 @@ on:
 
 env:
   AWS_REGION: us-west-2
-  ECR_REPOSITORY: sengoku-repository
-  ECS_CLUSTER: sengoku-cluster
-  ECS_SERVICE: sengoku-service
-  ECS_TASK_DEFINITION: sengoku-task-definition
-  ECS_CONTAINER: sengoku-container
+  ECR_REPOSITORY: orange-dev-repository
+  ECS_CLUSTER: orange-dev-cluster
+  ECS_SERVICE: orange-dev-service
+  ECS_TASK_DEFINITION: orange-dev-task-definition
+  ECS_CONTAINER: orange-dev-container
 
 
 permissions:
