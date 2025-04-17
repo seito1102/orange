@@ -1,0 +1,145 @@
+name: backend Deploy Pipeline
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+  ECR_REPOSITORY: sengoku-repository
+  ECS_CLUSTER: sengoku-cluster
+  ECS_SERVICE: sengoku-service
+  ECS_TASK_DEFINITION: sengoku-task-definition
+  ECS_CONTAINER: sengoku-container
+
+
+permissions:
+  id-token: write # AWSのOpenIDConnectのための設定
+  contents: read # checkoutのために必要
+
+jobs:
+  build: 
+    runs-on: ubuntu-latest
+    # イメージURIを次のジョブに渡すためにアウトプットしておく
+    outputs:
+      image_uri: ${{ steps.push-image.outputs.uri }}
+
+    steps:
+      # checkout
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Build
+        shell: bash
+        run: ./gradlew :backend:build -x test
+
+      - name: build image
+        run: |
+          cd backend
+          docker build -f src/main/docker/Dockerfile.jvm -t temp_image:latest .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Check ECR_REGISTRY
+        run: echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}"
+
+      - name: Push the image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker image tag temp_image:latest $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker image push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          echo "uri=$ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+  deploy: 
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: show image-uri
+        run: echo ${{ needs.build.outputs.image_uri }}
+
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+
+      # タスク定義の JSON ファイルをダウンロードして、taskDefinition部分だけを抜き出す
+      - name: Download task definition
+        shell: bash
+        run: |
+          aws ecs describe-task-definition --task-definition ${{ env.ECS_TASK_DEFINITION }} --query taskDefinition > task-definition.json
+          cat task-definition.json | jq .
+
+      # タスク定義の JSON ファイルを読み込む
+      # 指定した container-name の image フィールドを、新しいイメージに更新する
+      # 更新された JSON を新しいファイルとして出力する
+      # 後続のデプロイステップでこの新しいタスク定義を使用できるようにする
+      - name: Fill in the new image URI in the amazon ECS task definition
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.ECS_CONTAINER }}
+          image: ${{ needs.build.outputs.image_uri }}
+
+      - name: show render task-definition
+        run: echo ${{ steps.render-task-def.outputs.task-definition }}
+
+      # 動的に appspec.json を作成
+      # https://github.com/aws-actions/amazon-ecs-deploy-task-definition/blob/master/index.js
+      # TaskDefinitionさえあれば良いかも
+      - name: Generate dynamic appspec.json
+        run: |
+          echo '{
+            "version": 0.0,
+            "Resources": [
+              {
+                "TargetService": {
+                  "Type": "AWS::ECS::Service",
+                  "Properties": {
+                    "TaskDefinition": "${{ steps.render-task-def.outputs.task-definition }}",
+                    "LoadBalancerInfo": {
+                      "ContainerName": "${{ env.ECS_CONTAINER }}",
+                      "ContainerPort": 8080
+                    }
+                  }
+                }
+              }
+            ]
+          }' > appspec.json
+
+      - name: show appspec.json
+        run: cat appspec.json
+
+      - name: Deploy ECS task
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          service: ${{ env.ECS_SERVICE }}
+          wait-for-service-stability: true # 更新が完了するまで待機するオプション
+          # コードデプロイを使う場合
+          # https://github.com/aws-actions/amazon-ecs-deploy-task-definition#aws-codedeploy-support
+          codedeploy-appspec: appspec.json
+          codedeploy-application: sengoku-codedeploy-application
+          codedeploy-deployment-group: sengoku-codedeploy-deployment-group

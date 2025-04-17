@@ -1,0 +1,20 @@
+plugins {
+    id 'com.github.node-gradle.node' version '7.0.1'
+}
+
+node {
+    version = '21.6.1'  // Node.js のバージョン指定
+    npmVersion = '10.1.0'  // npm のバージョン指定
+    download = true  // ローカルに Node.js をダウンロード
+}
+
+task build(type: NpmTask) {
+    dependsOn npmInstall
+    args = ['run', 'build']
+}
+
+// frontendのテストタスク追加
+task test(type: NpmTask) {
+    dependsOn npmInstall
+    args = ['run', 'test']
+}

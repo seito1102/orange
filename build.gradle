@@ -1,0 +1,16 @@
+// base プラグインでbuildやtestとった基本的なタスクを取り込む
+plugins {
+    id 'base'
+}
+
+// `./gradlew build` で Quarkus + Vue3 をまとめてビルド
+tasks.named('build') {
+    dependsOn ':backend:build'
+    dependsOn ':frontend:build'
+}
+
+// `./gradlew test` で Quarkus + Vue3 をまとめてテスト
+task test {
+    dependsOn ':backend:test'
+    dependsOn ':frontend:test'
+}
